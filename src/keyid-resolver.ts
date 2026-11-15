@@ -5,10 +5,27 @@
 //
 // Both shapes resolve to the same 32-byte Ed25519 raw public key so callers
 // can pass the result directly to `rfc9421.verify({ publicKey })`.
+//
+// Hardware-key path: a document may instead publish an EC P-256 key (a JWK
+// {"kty":"EC","crv":"P-256",...} in the DID Document, or a P-256 PEM SPKI in
+// the compact form). It resolves to the 65-byte uncompressed point with
+// `algorithm: "ecdsa-p256-sha256"`, for `verifyEcdsaP256({ publicKey })`.
+// Ed25519 documents resolve exactly as before.
+
+import { createPublicKey } from "node:crypto";
+
+import { p256PointFromJwk, p256PointFromKey } from "./p256.js";
+
+export type KeyAlgorithm = "ed25519" | "ecdsa-p256-sha256";
 
 export interface ResolvedKey {
-  /** Raw Ed25519 public key (32 bytes). */
+  /**
+   * Raw Ed25519 public key (32 bytes), or for `ecdsa-p256-sha256` the
+   * uncompressed P-256 point (65 bytes).
+   */
   publicKey: Uint8Array;
+  /** Algorithm of `publicKey`; callers must verify with the matching scheme. */
+  algorithm: KeyAlgorithm;
   /** Shape we dispatched on. Useful for telemetry / debugging. */
   shape: "did-json" | "compact";
   /** Original document (parsed JSON), for callers needing more context. */
@@ -53,17 +70,9 @@ export async function resolveKeyid(
     .toLowerCase();
 
   if (contentType === "application/did+json") {
-    return {
-      publicKey: extractEd25519FromDidDocument(doc),
-      shape: "did-json",
-      document: doc,
-    };
+    return { ...extractFromDidDocument(doc), shape: "did-json", document: doc };
   }
-  return {
-    publicKey: extractEd25519FromCompactForm(doc),
-    shape: "compact",
-    document: doc,
-  };
+  return { ...extractFromCompactForm(doc), shape: "compact", document: doc };
 }
 
 async function readBoundedBody(res: Response, max: number): Promise<Uint8Array> {
@@ -106,11 +115,30 @@ interface CompactKeyDoc {
   public_key: string;
 }
 
-function extractEd25519FromCompactForm(doc: unknown): Uint8Array {
+interface KeyMaterial {
+  publicKey: Uint8Array;
+  algorithm: KeyAlgorithm;
+}
+
+function extractFromCompactForm(doc: unknown): KeyMaterial {
   if (!isRecord(doc) || typeof doc["public_key"] !== "string") {
     throw new Error("compact keyid document missing string `public_key`");
   }
-  return decodeEd25519Spki((doc as unknown as CompactKeyDoc).public_key);
+  const pem = (doc as unknown as CompactKeyDoc).public_key;
+  const p256 = tryP256Spki(pem);
+  if (p256 !== undefined) {
+    return { publicKey: p256, algorithm: "ecdsa-p256-sha256" };
+  }
+  return { publicKey: decodeEd25519Spki(pem), algorithm: "ed25519" };
+}
+
+/** The P-256 point if `pem` is a P-256 SPKI; undefined for any other key. */
+function tryP256Spki(pem: string): Uint8Array | undefined {
+  try {
+    return p256PointFromKey(createPublicKey(pem));
+  } catch {
+    return undefined;
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -122,7 +150,7 @@ interface DidVerificationMethod {
   type: string;
   controller: string;
   publicKeyMultibase?: string;
-  publicKeyJwk?: { kty?: string; crv?: string; x?: string };
+  publicKeyJwk?: { kty?: string; crv?: string; x?: string; y?: string };
 }
 
 interface DidDocument {
@@ -137,7 +165,7 @@ const ED25519_TYPES = new Set([
   "JsonWebKey2020",
 ]);
 
-function extractEd25519FromDidDocument(doc: unknown): Uint8Array {
+function extractFromDidDocument(doc: unknown): KeyMaterial {
   if (!isRecord(doc)) {
     throw new Error("DID document is not a JSON object");
   }
@@ -155,11 +183,14 @@ function extractEd25519FromDidDocument(doc: unknown): Uint8Array {
     methods.find((m) => ED25519_TYPES.has(m.type));
 
   if (method === undefined) {
-    throw new Error("DID document has no Ed25519 verification method");
+    throw new Error("DID document has no supported verification method");
   }
 
   if (typeof method.publicKeyMultibase === "string") {
-    return decodeEd25519Multibase(method.publicKeyMultibase);
+    return {
+      publicKey: decodeEd25519Multibase(method.publicKeyMultibase),
+      algorithm: "ed25519",
+    };
   }
   if (
     isRecord(method.publicKeyJwk) &&
@@ -167,10 +198,20 @@ function extractEd25519FromDidDocument(doc: unknown): Uint8Array {
     method.publicKeyJwk.crv === "Ed25519" &&
     typeof method.publicKeyJwk.x === "string"
   ) {
-    return base64UrlDecode(method.publicKeyJwk.x);
+    return {
+      publicKey: base64UrlDecode(method.publicKeyJwk.x),
+      algorithm: "ed25519",
+    };
+  }
+  if (isRecord(method.publicKeyJwk) && method.publicKeyJwk.kty === "EC") {
+    const point = p256PointFromJwk(method.publicKeyJwk);
+    if (point === undefined) {
+      throw new Error("DID verification method has a malformed EC P-256 JWK");
+    }
+    return { publicKey: point, algorithm: "ecdsa-p256-sha256" };
   }
   throw new Error(
-    "DID verification method has neither publicKeyMultibase nor Ed25519 JWK",
+    "DID verification method has neither publicKeyMultibase nor an Ed25519 or EC P-256 JWK",
   );
 }
 

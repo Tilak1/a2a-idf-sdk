@@ -18,7 +18,28 @@ export {
   resolveKeyid,
   type ResolvedKey,
   type ResolveOptions,
+  type KeyAlgorithm,
 } from "./keyid-resolver.js";
+
+export {
+  signEcdsaP256,
+  verifyEcdsaP256,
+  parseP256SignatureInput,
+  ECDSA_P256_ALG,
+  type P256Signer,
+  type P256SignatureParams,
+  type SignP256Inputs,
+  type VerifyP256Inputs,
+  type P256VerifyResult,
+  type P256VerifyFailureReason,
+} from "./rfc9421-p256.js";
+
+export {
+  p256JwkFromPoint,
+  p256PointFromJwk,
+  p256PointFromKey,
+  type P256Jwk,
+} from "./p256.js";
 
 export {
   ReplayCache,

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { generateKeyPairSync } from "node:crypto";
 import { resolveKeyid } from "../src/keyid-resolver.js";
+import { p256JwkFromPoint, p256PointFromKey } from "../src/p256.js";
 
 const RAW_PUBKEY_HEX =
   "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
@@ -103,5 +105,67 @@ describe("keyid-resolver — dual-shape parity", () => {
     });
     expect(r.shape).toBe("did-json");
     expect(r.publicKey).toEqual(expectedRawKey);
+  });
+});
+
+describe("keyid-resolver — EC P-256 hardware key", () => {
+  const key = generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey;
+  const jwk = key.export({ format: "jwk" });
+  const point = p256PointFromKey(key)!;
+  const didDoc = (publicKeyJwk: unknown) =>
+    JSON.stringify({
+      id: "did:web:example.com",
+      verificationMethod: [
+        {
+          id: "did:web:example.com#key-1",
+          type: "JsonWebKey2020",
+          controller: "did:web:example.com",
+          publicKeyJwk,
+        },
+      ],
+      assertionMethod: ["did:web:example.com#key-1"],
+    });
+
+  it("resolves a DID Document EC JWK to the uncompressed point", async () => {
+    const r = await resolveKeyid("https://example.com/.well-known/did.json", {
+      fetch: mockFetch(didDoc(jwk), "application/did+json"),
+    });
+    expect(r.algorithm).toBe("ecdsa-p256-sha256");
+    expect(r.publicKey).toEqual(point);
+    expect(r.publicKey.length).toBe(65);
+    expect(p256JwkFromPoint(r.publicKey)).toEqual({ ...jwk });
+  });
+
+  it("resolves the compact form with a P-256 PEM SPKI", async () => {
+    const pem = key.export({ format: "pem", type: "spki" }) as string;
+    const r = await resolveKeyid("https://example.com/key", {
+      fetch: mockFetch(JSON.stringify({ address: "a@b", public_key: pem }), "application/json"),
+    });
+    expect(r.shape).toBe("compact");
+    expect(r.algorithm).toBe("ecdsa-p256-sha256");
+    expect(r.publicKey).toEqual(point);
+  });
+
+  it("still reports Ed25519 documents as ed25519", async () => {
+    const r = await resolveKeyid("https://example.com/key", {
+      fetch: mockFetch(JSON.stringify({ address: "a@b", public_key: PEM_SPKI }), "application/json"),
+    });
+    expect(r.algorithm).toBe("ed25519");
+  });
+
+  it("rejects malformed or off-curve EC JWKs and other curves", async () => {
+    const bad = [
+      { ...jwk, y: jwk.x },
+      { ...jwk, x: undefined },
+      { ...jwk, crv: "P-384" },
+      { ...jwk, x: "AA" },
+    ];
+    for (const j of bad) {
+      await expect(
+        resolveKeyid("https://example.com/did.json", {
+          fetch: mockFetch(didDoc(j), "application/did+json"),
+        }),
+      ).rejects.toThrow(/EC P-256 JWK/);
+    }
   });
 });
