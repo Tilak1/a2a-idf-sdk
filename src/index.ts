@@ -48,6 +48,9 @@ export {
   type HardwareBoundFailureReason,
   type VerifyHardwareBoundRequestInputs,
   type PinnedAk,
+  type EvidenceAppraiser,
+  type EvidenceAppraisal,
+  type EvidenceAppraisalInput,
 } from "./tpm/policy.js";
 
 export {

@@ -5,6 +5,7 @@ import { NonceChallenger } from "../../src/tpm/challenge.js";
 import { encodeEvidenceBundle } from "../../src/tpm/evidence.js";
 import {
   verifyHardwareBoundRequest,
+  type EvidenceAppraiser,
   type HardwareBoundRequest,
 } from "../../src/tpm/policy.js";
 import { signEcdsaP256 } from "../../src/rfc9421-p256.js";
@@ -96,11 +97,13 @@ function world() {
   const verify = (
     req: HardwareBoundRequest,
     pinned: Parameters<typeof verifyHardwareBoundRequest>[0]["pinnedAk"] = ak.akPem,
+    appraiser?: EvidenceAppraiser,
   ) =>
     verifyHardwareBoundRequest({
       request: req,
       challenger,
       pinnedAk: pinned,
+      ...(appraiser ? { appraiser } : {}),
       resolve: { fetch },
       nowSeconds: NOW + 1,
     });
@@ -284,5 +287,45 @@ describe("verifyHardwareBoundRequest: other rejections", () => {
       nowSeconds: NOW + 1,
     });
     expect(r).toEqual({ ok: false, reason: "key-resolution-failed" });
+  });
+});
+
+describe("verifyHardwareBoundRequest: external appraiser", () => {
+  it("runs after local checks, with the verified key and attestation", async () => {
+    const w = world();
+    const n = w.challenger.issue();
+    let seen: Parameters<EvidenceAppraiser["appraise"]>[0] | undefined;
+    const r = await w.verify(await w.request(n), w.ak.akPem, {
+      appraise: async (input) => { seen = input; return { ok: true }; },
+    });
+    expect(r.ok).toBe(true);
+    expect(seen?.keyid).toBe(KEYID);
+    expect(Buffer.from(seen!.attest.extraData).equals(Buffer.from(n))).toBe(true);
+  });
+
+  it("can reject evidence that passed the local checks", async () => {
+    const w = world();
+    const r = await w.verify(await w.request(w.challenger.issue()), w.ak.akPem, {
+      appraise: async () => ({ ok: false, reason: "policy" }),
+    });
+    expect(r).toEqual({ ok: false, reason: "appraisal-rejected" });
+  });
+
+  it("fails closed when the appraiser throws", async () => {
+    const w = world();
+    const r = await w.verify(await w.request(w.challenger.issue()), w.ak.akPem, {
+      appraise: async () => { throw new Error("verifier down"); },
+    });
+    expect(r).toEqual({ ok: false, reason: "appraisal-failed" });
+  });
+
+  it("is never consulted when a local check already failed", async () => {
+    const w = world();
+    let called = false;
+    const r = await w.verify(await w.request(w.challenger.issue(), { evidence: null }), w.ak.akPem, {
+      appraise: async () => { called = true; return { ok: true }; },
+    });
+    expect(r).toEqual({ ok: false, reason: "evidence-missing" });
+    expect(called).toBe(false);
   });
 });

@@ -15,6 +15,10 @@
 //   5. The request signature verifies under that key.
 //   6. The evidence binds that same key (name, fixedTPM/fixedParent, JWK
 //      match) to the challenge nonce, under the pinned AK.
+//   7. Optionally, an external `EvidenceAppraiser` (e.g. a Veraison client)
+//      must also accept the evidence. It runs last and can only tighten the
+//      decision: it never replaces the checks above, and an appraiser that
+//      throws rejects the request.
 //
 // The challenge nonce doubles as the RFC 9421 `nonce` parameter, written as
 // base64url of the 32 challenge bytes. That ties the evidence to this signed
@@ -41,7 +45,11 @@ import {
   type ChallengedEvidenceFailureReason,
   type NonceChallenger,
 } from "./challenge.js";
-import { decodeEvidenceBundle, EvidenceFormatError } from "./evidence.js";
+import {
+  decodeEvidenceBundle,
+  EvidenceFormatError,
+  type TpmEvidenceBundle,
+} from "./evidence.js";
 import type { TpmCertifyAttest, TpmEccPublic } from "./structures.js";
 
 export type PinnedAk = KeyObject | string;
@@ -60,6 +68,28 @@ export interface HardwareBoundRequest {
   evidence?: string;
 }
 
+export interface EvidenceAppraisalInput {
+  keyid: string;
+  bundle: TpmEvidenceBundle;
+  /** The certified key and Certify attestation, already verified locally. */
+  key: TpmEccPublic;
+  attest: TpmCertifyAttest;
+}
+
+export type EvidenceAppraisal =
+  | { ok: true }
+  | { ok: false; reason?: string };
+
+/**
+ * An optional second opinion on the evidence, e.g. a Veraison verifier. Veraison's
+ * built-in TPM scheme (tpm-enacttrust) appraises TPM2_Quote PCR digests, not a
+ * Certify of a signing key, so using it here needs a custom scheme or a
+ * separate quote; the local checks stay the authority on key binding and nonce.
+ */
+export interface EvidenceAppraiser {
+  appraise(input: EvidenceAppraisalInput): Promise<EvidenceAppraisal>;
+}
+
 export interface VerifyHardwareBoundRequestInputs {
   request: HardwareBoundRequest;
   challenger: NonceChallenger;
@@ -68,6 +98,8 @@ export interface VerifyHardwareBoundRequestInputs {
    * rejects the request before the keyid URL is fetched.
    */
   pinnedAk: PinnedAk | ((keyid: string) => PinnedAk | undefined);
+  /** Optional external appraisal, run after every local check passes. */
+  appraiser?: EvidenceAppraiser;
   /** Options for `resolveKeyid` (fetch override, size cap, abort signal). */
   resolve?: ResolveOptions;
   maxAgeSeconds?: number;
@@ -81,6 +113,8 @@ export type HardwareBoundFailureReason =
   | ChallengedEvidenceFailureReason
   | "evidence-missing"
   | "evidence-malformed"
+  | "appraisal-rejected"
+  | "appraisal-failed"
   | "key-resolution-failed"
   | "key-algorithm-not-p256";
 
@@ -172,6 +206,21 @@ export async function verifyHardwareBoundRequest(
     nonce: nonceBytes,
   });
   if (!evidence.ok) return fail(evidence.reason);
+
+  if (inputs.appraiser !== undefined) {
+    let appraisal: EvidenceAppraisal;
+    try {
+      appraisal = await inputs.appraiser.appraise({
+        keyid: params.keyid,
+        bundle,
+        key: evidence.key,
+        attest: evidence.attest,
+      });
+    } catch {
+      return fail("appraisal-failed");
+    }
+    if (!appraisal.ok) return fail("appraisal-rejected");
+  }
 
   return {
     ok: true,
