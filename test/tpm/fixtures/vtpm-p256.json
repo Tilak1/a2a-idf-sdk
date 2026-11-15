@@ -1,0 +1,20 @@
+{
+  "description": "Output captured from a Hyper-V virtual TPM (a software TPM, not a physical chip) with throwaway P-256 keys: an unrestricted signing key and a restricted attestation key (AK), both fixedTPM|fixedParent|sensitiveDataOrigin|userWithAuth. The Certify was run with a hand-built TPM2_Certify via tpm2_send because tpm2_certify 5.7 has no qualifying-data option and hardcodes extraData to 00ff55aa.",
+  "nonce": "a41ed60b0087ba24d43eb08b5e2b9190250fe0f61a1d7a575afe4afed18d5025",
+  "keyPub": "00580023000b00040072000000100018000b000300100020e575e820953586f39f86b699e216153271bf64d4d751e26c91f7cee2e64e22f70020907988558ce8504df79bc331563b3b870569b1b93c3a8c5307b2924cb6bd1492",
+  "keyName": "000b5ba52d901864735a65aba431b3a404b06c7994f2e1913d8a54e010a8bda18497",
+  "keyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE5XXoIJU1hvOfhraZ4hYVMnG/ZNTX\nUeJskffO4uZOIveQeYhVjOhQTfebwzFWOzuHBWmxuTw6jFMHspJMtr0Ukg==\n-----END PUBLIC KEY-----\n",
+  "akPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEky7MsDrF5KGwnTkGwBESjpg4a7rA\neuhKVp9YjSRGXb/YhbBfGU6KuvuhJS9EVhaK5f9Sr95B5kEUKF8Eo3rBGA==\n-----END PUBLIC KEY-----\n",
+  "certInfo": "ff54434780170022000bf5805baff94845c0b659ac2998f646346f320785e5a076fc77f3b9e52da3bb190020a41ed60b0087ba24d43eb08b5e2b9190250fe0f61a1d7a575afe4afed18d502500000000028dc3597b82daf3f686c042014398a9f98fbaa8580022000b5ba52d901864735a65aba431b3a404b06c7994f2e1913d8a54e010a8bda184970022000b925dd96191ccee383a3185660bed7dd94a7d4a3794599dfe6254a083f6da2a2c",
+  "certSigTss": "0018000b002053e10eb01dccac1fd6de72435deff4354f6c38d3d1ff304997e5e8f6300e58c100208a5df14f83acab5cdb87e20dde6b6116c38ecbe3a71f8ad725bbe5b261d2be77",
+  "tpm2CertifyDefault": {
+    "note": "attest extraData as produced by stock tpm2_certify 5.7: the TPM2B_DATA (size 4) 00ff55aa, independent of any nonce",
+    "extraDataTpm2b": "000400ff55aa"
+  },
+  "sign": {
+    "note": "tpm2_sign of the digest with the signing key. -f tss (default) is a TPMT_SIGNATURE; -f plain is variable-length DER (here 71 bytes: r carries a 0x00 pad because its top bit is set).",
+    "digest": "541a2d0d1f26f09f8377267e545827e42465673e729f42f455acdb43ccbd38ab",
+    "tss": "0018000b00206eefff337c25f022b6cf92df172054ef3109a7347941356adb24d6fb3785009f0020f502d9feace5e4cbcdb113b39b8ab0438b82e8fede70424aaab50fb8a998b292",
+    "derPlain": "3045022100e57805f5ec4745e4ae12b107138ffa30c512f3edc322f128b1787128fafb1434022071e2184a401b9021528a19f51f0647cc29eb82037359049e62fbc505091ec3f3"
+  }
+}
