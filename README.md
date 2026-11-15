@@ -20,13 +20,15 @@ Verifier-side first. Given a signed A2A request (RFC 9421 over Ed25519), this SD
 
 Signer-side is supported via a minimal `sign()` for clients that need to produce request signatures or build test fixtures.
 
+An optional hardware-key path lets the signing key be a P-256 key inside a TPM 2.0, with the relying party checking that the key is TPM-resident for a challenge it issued. See [Hardware-key path](#hardware-key-path-tpm-20-p-256).
+
 ## Install
 
 ```bash
 npm install @opena2a/a2a-idf
 ```
 
-Runtime dependencies are exactly two: [`@noble/ed25519`](https://github.com/paulmillr/noble-ed25519) and [`@noble/hashes`](https://github.com/paulmillr/noble-hashes). No transitive cryptography deps; nothing pulls in OpenSSL FFI or `node-forge`.
+Runtime dependencies are exactly two: [`@noble/ed25519`](https://github.com/paulmillr/noble-ed25519) and [`@noble/hashes`](https://github.com/paulmillr/noble-hashes). No transitive cryptography deps; nothing pulls in OpenSSL FFI or `node-forge`. The hardware-key path adds no packages: it uses Node's built-in `node:crypto`, and the TPM host side shells out to [tpm2-tools](https://github.com/tpm2-software/tpm2-tools).
 
 ## Quick start
 
@@ -140,16 +142,33 @@ Chain rules enforced: first link is a root (signed by the originating delegator)
 
 `resolveKeyid()` dispatches on `Content-Type`:
 
-- `application/did+json` → W3C DID Document with an Ed25519 verification method (`publicKeyMultibase` or `publicKeyJwk` with `crv: "Ed25519"`).
+- `application/did+json` → W3C DID Document with an Ed25519 verification method (`publicKeyMultibase` or `publicKeyJwk` with `crv: "Ed25519"`), or an EC P-256 `publicKeyJwk`.
 - anything else → Envoys §6 compact form `{ address, public_key: <PEM SPKI> }`.
 
-Both shapes return the same 32-byte raw Ed25519 key, so callers can pass it directly to `verify({ publicKey })`.
+Both shapes return the same 32-byte raw Ed25519 key for Ed25519 documents (`algorithm: "ed25519"`), so callers can pass it directly to `verify({ publicKey })`. A P-256 document returns the 65-byte uncompressed point with `algorithm: "ecdsa-p256-sha256"`, for the hardware-key verifier below. Check `algorithm` before choosing a verifier.
+
+### Hardware-key path (TPM 2.0, P-256)
+
+```ts
+import { NonceChallenger, verifyHardwareBoundRequest } from "@opena2a/a2a-idf";
+
+const challenger = new NonceChallenger();
+const nonce = challenger.issue(); // send to the host as the challenge
+
+const result = await verifyHardwareBoundRequest({
+  request: { method, authority, path, body, headers, evidence },
+  challenger,
+  pinnedAk: (keyid) => pinnedAks.get(keyid),
+});
+```
+
+The request is signed with `ecdsa-p256-sha256` (RFC 9421), and the evidence is a `TPM2_Certify` of the signing key that carries the challenge nonce. Without valid evidence for the published key, the request is rejected. The Ed25519 `sign()` / `verify()` path is unchanged. Hosts use `@opena2a/a2a-idf/tpm-host`. The design, wire formats, failure reasons and limitations are in [docs/hardware-key.md](docs/hardware-key.md). The attestation key is pinned (no EK chain) and the reference setup uses a virtual TPM; read the limitations there.
 
 ## What this SDK does **not** ship at MVP
 
-- Algorithm agility (Ed25519 only — the spec reserves the field).
+- General algorithm agility. Ed25519 is the default; ECDSA P-256 is supported only as the [hardware-key path](docs/hardware-key.md) with its own verifier.
 - HTTP transport (consumers pass already-fetched bodies and headers).
-- Key generation / persistence (use a platform keychain or [`@opena2a/secretless`](https://github.com/opena2a-org/secretless)).
+- Software key generation / persistence (use a platform keychain or [`@opena2a/secretless`](https://github.com/opena2a-org/secretless)). TPM key generation is available through the hardware-key path.
 - Browser bundle (Node 24+ only at v0.1).
 - CLI verb wrappers.
 
@@ -162,3 +181,4 @@ These are scoped for `v0.2` and onward.
 ## Documentation
 
 - [Contributing](docs/CONTRIBUTING.md): where byte-match fixtures and cross-implementation behavior changes are proposed.
+- [Hardware-key path](docs/hardware-key.md): TPM 2.0 P-256 keys, evidence, nonce challenges and their limits.

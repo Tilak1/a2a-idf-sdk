@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./tpm-host": {
+      "types": "./dist/tpm/host.d.ts",
+      "import": "./dist/tpm/host.js"
     }
   },
   "files": [
