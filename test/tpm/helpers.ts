@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import {
   createPublicKey,
   generateKeyPairSync,
@@ -120,4 +121,18 @@ export function keyPublicForPoint(point: Uint8Array): Uint8Array {
   out.set(point.subarray(1, 33), 24);
   out.set(point.subarray(33, 65), 58);
   return out;
+}
+
+/** True when /dev/tpmrm0 is usable and tpm2-tools is installed. */
+export function tpmAvailable(): boolean {
+  try {
+    accessSync("/dev/tpmrm0", constants.R_OK | constants.W_OK);
+    execFileSync("tpm2_getcap", ["properties-fixed"], {
+      env: { ...process.env, TPM2TOOLS_TCTI: "device:/dev/tpmrm0" },
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }

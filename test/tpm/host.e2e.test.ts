@@ -3,8 +3,6 @@
 // persistent handles, so it does not disturb other keys on the TPM.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { accessSync, constants } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { createPublicKey } from "node:crypto";
 
 import { NonceChallenger } from "../../src/tpm/challenge.js";
@@ -13,19 +11,7 @@ import { TpmHost, type HardwareKeyInfo } from "../../src/tpm/host.js";
 import { verifyHardwareBoundRequest, type HardwareBoundRequest } from "../../src/tpm/policy.js";
 import { signEcdsaP256, verifyEcdsaP256 } from "../../src/rfc9421-p256.js";
 import { p256PointFromJwk } from "../../src/p256.js";
-
-function tpmAvailable(): boolean {
-  try {
-    accessSync("/dev/tpmrm0", constants.R_OK | constants.W_OK);
-    execFileSync("tpm2_getcap", ["properties-fixed"], {
-      env: { ...process.env, TPM2TOOLS_TCTI: "device:/dev/tpmrm0" },
-      stdio: "ignore",
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { tpmAvailable } from "./helpers.js";
 
 const KEYID = "https://agent.example.com/.well-known/did.json";
 const BODY = new TextEncoder().encode('{"task":"run"}');
