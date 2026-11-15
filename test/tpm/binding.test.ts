@@ -1,10 +1,4 @@
-import { readFileSync } from "node:fs";
-import {
-  createPublicKey,
-  generateKeyPairSync,
-  sign as cryptoSign,
-  type KeyObject,
-} from "node:crypto";
+import { generateKeyPairSync } from "node:crypto";
 import { describe, it, expect } from "vitest";
 
 import {
@@ -13,28 +7,17 @@ import {
   type TpmEvidence,
 } from "../../src/tpm/binding.js";
 import {
-  TPM_ALG_ECDSA,
-  TPM_ALG_SHA256,
-  TPM_GENERATED_VALUE,
-  TPM_ST_ATTEST_CERTIFY,
-  computeTpmName,
-  parseTpm2bPublic,
-} from "../../src/tpm/structures.js";
-
-const fx = JSON.parse(
-  readFileSync(new URL("./fixtures/vtpm-p256.json", import.meta.url), "utf8"),
-);
-const hex = (s: string): Uint8Array => Uint8Array.from(Buffer.from(s, "hex"));
-const jwkOf = (pem: string): EcP256Jwk =>
-  createPublicKey(pem).export({ format: "jwk" }) as EcP256Jwk;
-
-const nonce = hex(fx.nonce);
-const keyJwk = jwkOf(fx.keyPem);
-const realEvidence: TpmEvidence = {
-  certInfo: hex(fx.certInfo),
-  certSignature: hex(fx.certSigTss),
-  keyPublic: hex(fx.keyPub),
-};
+  ATTR_LOW_BYTE,
+  CURVE_LOW_BYTE,
+  editKeyPublic,
+  fx,
+  hex,
+  jwkOf,
+  keyJwk,
+  nonce,
+  realEvidence,
+  syntheticAk,
+} from "./helpers.js";
 
 const verifyReal = (over: Partial<Parameters<typeof verifyTpmBinding>[0]> = {}) =>
   verifyTpmBinding({
@@ -44,84 +27,6 @@ const verifyReal = (over: Partial<Parameters<typeof verifyTpmBinding>[0]> = {}) 
     jwk: keyJwk,
     ...over,
   });
-
-// --- helpers to build AK-signed evidence with chosen contents -------------
-
-const u16 = (n: number): number[] => [(n >> 8) & 0xff, n & 0xff];
-const u32 = (n: number): number[] => [...u16(n >>> 16), ...u16(n & 0xffff)];
-const tpm2b = (b: Uint8Array): number[] => [...u16(b.length), ...b];
-
-function buildAttest(extraData: Uint8Array, certifiedName: Uint8Array): Uint8Array {
-  return Uint8Array.from([
-    ...u32(TPM_GENERATED_VALUE),
-    ...u16(TPM_ST_ATTEST_CERTIFY),
-    ...tpm2b(new Uint8Array(34).fill(1)), // qualifiedSigner
-    ...tpm2b(extraData),
-    ...new Array(8).fill(0), // clock
-    ...u32(1), // resetCount
-    ...u32(2), // restartCount
-    1, // safe
-    ...new Array(8).fill(0), // firmwareVersion
-    ...tpm2b(certifiedName),
-    ...tpm2b(certifiedName), // certifiedQualifiedName
-  ]);
-}
-
-function tpmtSignature(raw: Uint8Array, hashAlg = TPM_ALG_SHA256): Uint8Array {
-  return Uint8Array.from([
-    ...u16(TPM_ALG_ECDSA),
-    ...u16(hashAlg),
-    ...tpm2b(raw.subarray(0, 32)),
-    ...tpm2b(raw.subarray(32)),
-  ]);
-}
-
-interface Synthetic {
-  akPem: string;
-  akKey: KeyObject;
-  make(opts?: {
-    keyPublic?: Uint8Array;
-    extraData?: Uint8Array;
-    certifiedName?: Uint8Array;
-  }): TpmEvidence;
-  /** Signs arbitrary bytes as if they were the Certify structure. */
-  signCertInfo(certInfo: Uint8Array): TpmEvidence;
-}
-
-function syntheticAk(): Synthetic {
-  const { publicKey, privateKey } = generateKeyPairSync("ec", {
-    namedCurve: "P-256",
-  });
-  const signCertInfo = (
-    certInfo: Uint8Array,
-    keyPublic = realEvidence.keyPublic,
-  ): TpmEvidence => {
-    const raw = cryptoSign("sha256", certInfo, {
-      key: privateKey,
-      dsaEncoding: "ieee-p1363",
-    });
-    return { certInfo, certSignature: tpmtSignature(raw), keyPublic };
-  };
-  return {
-    akPem: publicKey.export({ format: "pem", type: "spki" }) as string,
-    akKey: publicKey,
-    make({ keyPublic = realEvidence.keyPublic, extraData = nonce, certifiedName } = {}) {
-      const name = certifiedName ?? computeTpmName(parseTpm2bPublic(keyPublic));
-      return signCertInfo(buildAttest(extraData, name), keyPublic);
-    },
-    signCertInfo,
-  };
-}
-
-/** Returns a copy of the fixture TPM2B_PUBLIC with `edit` applied to it. */
-const editKeyPublic = (edit: (b: Uint8Array) => void): Uint8Array => {
-  const b = Uint8Array.from(realEvidence.keyPublic);
-  edit(b);
-  return b;
-};
-// TPM2B_PUBLIC layout: size(2) type(2) nameAlg(2) objectAttributes(4) ...
-const ATTR_LOW_BYTE = 9;
-const CURVE_LOW_BYTE = 19;
 
 describe("verifyTpmBinding", () => {
   it("accepts the captured vTPM evidence for the issued nonce and JWK", () => {
