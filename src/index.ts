@@ -42,6 +42,27 @@ export {
 } from "./p256.js";
 
 export {
+  verifyHardwareBoundRequest,
+  type HardwareBoundRequest,
+  type HardwareBoundResult,
+  type HardwareBoundFailureReason,
+  type VerifyHardwareBoundRequestInputs,
+  type PinnedAk,
+} from "./tpm/policy.js";
+
+export {
+  NonceChallenger,
+  verifyChallengedEvidence,
+  type NonceChallengerOptions,
+} from "./tpm/challenge.js";
+
+export {
+  encodeEvidenceBundle,
+  decodeEvidenceBundle,
+  type TpmEvidenceBundle,
+} from "./tpm/evidence.js";
+
+export {
   ReplayCache,
   type ReplayCacheOptions,
 } from "./replay-cache.js";

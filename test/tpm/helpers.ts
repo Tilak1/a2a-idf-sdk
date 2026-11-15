@@ -109,3 +109,15 @@ export const editKeyPublic = (edit: (b: Uint8Array) => void): Uint8Array => {
 export const ATTR_LOW_BYTE = 9;
 export const CURVE_LOW_BYTE = 19;
 
+
+/**
+ * A TPM2B_PUBLIC (hardware-bound signing key attributes) for a P-256 point the
+ * test holds the private key of. Reuses the fixture layout: x at 24..55, y at
+ * 58..89.
+ */
+export function keyPublicForPoint(point: Uint8Array): Uint8Array {
+  const out = Uint8Array.from(realEvidence.keyPublic);
+  out.set(point.subarray(1, 33), 24);
+  out.set(point.subarray(33, 65), 58);
+  return out;
+}
